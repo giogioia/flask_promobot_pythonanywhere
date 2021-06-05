@@ -16,7 +16,7 @@ def home():
 
 @app.route('/download/', methods=['GET'])
 def download():
-    return send_from_directory('static','PromoBot.exe', as_attachment=True)
+    return send_from_directory('static','Promobot.zip', as_attachment=True)
 
 @app.route('/promobot_code/', methods=['GET'])
 def send_js():

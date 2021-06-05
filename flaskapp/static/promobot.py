@@ -16,22 +16,21 @@ import logging
 import sys
 import os
 import os.path
-from get_new_token import *
+import get_new_token
 import time
 #from tqdm import tqdm
 #from multiprocessing import Manager, Pool, Process, cpu_count
 #from concurrent.futures import ThreadPoolExecutor
-from colorama import Fore, Style
-#from subprocess import call
+#from colorama import Fore, Style
+from subprocess import call
 
 class Promobot:
-    global bot_name, mode, df_promo, upload_identifier, output_excel, output_path
+    global bot_name, mode, df_promo, upload_identifier, output_excel, output_path, platform
     bot_name = 'promobot'
-
     '''Init functions'''
     #Step 1: set path
     def set_path():
-        global cwd, token_path, input_path
+        global cwd, token_path, input_path, platform
         cwd = os.getcwd()
         '''
         #if sys has attribute _MEIPASS then script launched by bundled exe.
@@ -50,7 +49,10 @@ class Promobot:
         print('os.getcwd()',os.getcwd())
         '''
         token_path = os.path.join(cwd,'my_personal_token.json')
-
+        if os.name == 'nt':
+            platform = 'windows'
+        elif os.name == 'posix':
+            platform = 'mac'
 
     #Step 2: enable Logger
     def logger_start():
@@ -65,8 +67,12 @@ class Promobot:
         logger = logging.getLogger()
         logger.info(f"Starting log for {bot_name}")
         #print("Logger started")
-        #call(["chflags", "hidden", os.path.join(cwd,"my_log.log")])
-
+        if platform == 'mac':
+            call(["chflags", "hidden", os.path.join(cwd,"my_log.log")])
+            if os.path.isdir('__pycache__'): call(["chflags", "hidden", os.path.join(cwd,"__pycache__")])
+        elif platform == 'windows':
+            call(["attrib", "+h", os.path.join(cwd,"my_log.log")])
+            if os.path.isdir('__pycache__'): call(["attrib", "+h", os.path.join(cwd,"__pycache__")])
     #custom for Step 3: read credentials json
     def read_json():
         global content
@@ -86,13 +92,13 @@ class Promobot:
             try:
                 Promobot.read_json()
             except Exception:
-                get_token()
+                    get_new_token.Glovo_token()
             else:
                 welcome_name = glovo_email[:glovo_email.find("@")].replace("."," ").title()
-                print(f"\nWelcome back {welcome_name}")
+                print(f"\nLogged in as {welcome_name}")
         #if file does not exist: lauch file creation
         else:
-            get_token()
+            get_new_token.Glovo_token()
 
     #Step 4: get fresh api access token
     def refresh():
@@ -110,16 +116,17 @@ class Promobot:
             logger.info('Access Token Refreshed')
             #saving new refresh token
             content['refresh_token'] = new_refresh_token
-            with open(token_path, "w") as dst_file:
+            with open(token_path, "r+") as dst_file:
                 json.dump(content, dst_file)
-            print("token refreshed")
+            #print("token refreshed")
         else:
             print(f"Token NOT refreshed -> {oauth_request.content}")
             logger.info(f'Access Token NOT Refreshed -> {oauth_request.content}')
 
 
     def print_bot_name():
-        print('\n' + Fore.RED + Style.BRIGHT + bot_name + Style.RESET_ALL + '\n')
+        print('\nEl Promobot')
+        print('\nPartners Promotions Automation')
 
     '''''''''''''''''''''''''''''End Init'''''''''''''''''''''''''''''
 
@@ -129,7 +136,7 @@ class Promobot:
     def import_data(input_file):
         global df_promo
         #import data
-        df_promo = pd.read_excel(input_file)
+        df_promo = pd.read_excel(input_file, engine='openpyxl')
         #clean empty rows
         df_promo.dropna(how='all', inplace = True)
         #reset index after deleting empty rows
@@ -153,11 +160,11 @@ class Promobot:
         if df_promo.loc[:,"%GLOVO"].dtype == 'O':
             df_promo.loc[:,"%GLOVO"]= df_promo.loc[:,"%GLOVO"].str.strip('%')
             df_promo.loc[:,"%GLOVO"].astype('int')
-        print(f'Data extracted from {input_file}')
+        print(f'Data succesfully extracted from {os.path.join(os.path.basename(os.path.dirname(input_file)),os.path.basename(input_file))}')
 
     def set_upload_identifier():
         global upload_identifier
-        upload_identifier = input('Promos name or identifier: \t')
+        upload_identifier = input('\nEnter folder name for storing results:\t')
 
     def find_excel_file_path(excel_name):
         #walk in cwd -> return excel path or raise error
@@ -175,7 +182,7 @@ class Promobot:
     def set_input():
         global input_name
         while True:
-            input_name = input('Input file name:\t')
+            input_name = input('\nEnter Excel file name:\t')
             if '.xlsx' not in input_name: input_name = f'{input_name}.xlsx'
             #input_name = f'{bot_name}_input.xlsx'
             try:
@@ -203,7 +210,7 @@ class Promobot:
         time.sleep(0.5)
         global mode
         while True:
-            a_or_b = input('Select the type of operation you want to perform:\n[A] - Create Promos\n[B] - Delete Promos\n[C] - Check current Promos status\nPress "A", "B" or "C" then press ENTER:\t').lower().strip()
+            a_or_b = input('\nSelect the type of operation you want to perform:\n[A] - Create Promos\n[B] - Delete Promos\n[C] - Check current Promos status\nPress "A", "B" or "C" then press ENTER:\t').lower().strip()
             if a_or_b in ["a","b","c"]:
                 time.sleep(0.5)
                 if a_or_b == 'a':
@@ -358,27 +365,27 @@ class Promobot:
         else:
             url = 'https://adminapi.glovoapp.com/admin/partner_promotions'
             payload = {"name": df_promo.at[n,'Promo_Name'],
-                       "cityCode": df_promo.at[n,'City_Code'],
-                       "type": Promobot.p_type(df_promo.at[n,'Promo_Type ("FLAT"/"FREE"/"XX%")']),
-                       "percentage": Promobot.perc(df_promo.at[n,'Promo_Type ("FLAT"/"FREE"/"XX%")']),
-                       "deliveryFeeCents": Promobot.del_fee(df_promo.at[n,'Promo_Type ("FLAT"/"FREE"/"XX%")']),
-                       "startDate": Promobot.time_code('start',df_promo.at[n,"Start_Date (dd/mm/yyyy)"]),
-                       "endDate": Promobot.time_code('end',df_promo.at[n,"End_Date (included)"]),
-                       "openingTimes": None,
-                       "partners":[{"id": int(df_promo.at[n,'Store_ID']),
+                        "cityCode": df_promo.at[n,'City_Code'],
+                        "type": Promobot.p_type(df_promo.at[n,'Promo_Type ("FLAT"/"FREE"/"XX%")']),
+                        "percentage": Promobot.perc(df_promo.at[n,'Promo_Type ("FLAT"/"FREE"/"XX%")']),
+                        "deliveryFeeCents": Promobot.del_fee(df_promo.at[n,'Promo_Type ("FLAT"/"FREE"/"XX%")']),
+                        "startDate": Promobot.time_code('start',df_promo.at[n,"Start_Date (dd/mm/yyyy)"]),
+                        "endDate": Promobot.time_code('end',df_promo.at[n,"End_Date (included)"]),
+                        "openingTimes": None,
+                        "partners":[{"id": int(df_promo.at[n,'Store_ID']),
                                     "paymentStrategy": Promobot.paymentStrat((df_promo.at[n,'Subsidized_By (\"PARTNER\"/\"GLOVO\"/\"BOTH\")']).strip().upper()),
                                     "externalIds": Promobot.products_ID_list(n),
                                     "addresses": Promobot.store_addresses_ID_list(n),
                                     "commissionOnDiscountedPrice":False,
                                     "subsidyStrategy":"BY_PERCENTAGE",
                                     "sponsors":[{"sponsorId":1,
-                                       "sponsorOrigin":"GLOVO",
-                                       "subsidyValue":Promobot.subsidyValue("glovo", n)},
-                                      {"sponsorId":2,
-                                       "sponsorOrigin":"PARTNER",
-                                       "subsidyValue":Promobot.subsidyValue("partner", n)}]}],
-                       "customerTagId":None,
-                       "budget":None}
+                                        "sponsorOrigin":"GLOVO",
+                                        "subsidyValue":Promobot.subsidyValue("glovo", n)},
+                                        {"sponsorId":2,
+                                        "sponsorOrigin":"PARTNER",
+                                        "subsidyValue":Promobot.subsidyValue("partner", n)}]}],
+                        "customerTagId":None,
+                        "budget":None}
             p = requests.post(url, headers = {'authorization' : access_token}, json = payload)
             if p.ok is False:
                 print(f'Promo {n} NOT PROCESSED')
@@ -446,9 +453,9 @@ class Promobot:
         tz = datetime.now()
         output_excel = os.path.join(output_path, f'{bot_name}_{mode}_{tz.strftime("%Y_%m_%d_(h%H_%M)")}.xlsx')
         df_promo.loc[:,["Start_Date (dd/mm/yyyy)","End_Date (included)"]] = df_promo.loc[:,["Start_Date (dd/mm/yyyy)","End_Date (included)"]].apply(lambda x: x.dt.strftime('%d/%m/%Y'))
-        df_promo.to_excel(output_excel, index = False)
-        #saveback to original
-        with pd.ExcelWriter('promobot_input.xlsx') as writer:
+        #df_promo.to_excel(output_excel, index = False)
+        #save output
+        with pd.ExcelWriter(output_excel) as writer:
             df_promo.to_excel(writer, sheet_name = 'Promos', index=False)
             writer.sheets['Promos'].set_default_row(20)
             writer.sheets['Promos'].freeze_panes(1, 0)
@@ -462,23 +469,27 @@ class Promobot:
 
     '''main'''
     def main():
-        '''initiation code'''
-        Promobot.set_path()
-        Promobot.logger_start()
-        Promobot.login_check()
-        Promobot.refresh()
-        Promobot.print_bot_name()
-        '''bot code'''
-        Promobot.set_input()
-        Promobot.set_upload_identifier()
-        Promobot.create_output_dir()
-        Promobot.set_mode()
-        if mode == 'create':
-            Promobot.launch(Promobot.creation)
-        elif mode == 'delete':
-            Promobot.launch(Promobot.deletion)
-        elif mode == 'check':
-            Promobot.launch(Promobot.checker)
-        print(f'\n\n{bot_name} has processed {len(df_promo)} Store Addresses\n\nResults are available in file {os.path.relpath(output_excel)}')
-
-
+        try:
+            '''initiation code'''
+            Promobot.print_bot_name()
+            Promobot.set_path()
+            Promobot.logger_start()
+            Promobot.login_check()
+            Promobot.refresh()
+            '''bot code'''
+            Promobot.set_input()
+            Promobot.set_upload_identifier()
+            Promobot.create_output_dir()
+            Promobot.set_mode()
+            if mode == 'create':
+                Promobot.launch(Promobot.creation)
+            elif mode == 'delete':
+                Promobot.launch(Promobot.deletion)
+            elif mode == 'check':
+                Promobot.launch(Promobot.checker)
+            print(f'\n\n{bot_name} has processed {len(df_promo)} Store Addresses\n\nResults are available in file {os.path.relpath(output_excel)}')
+        except Exception as e:
+            print(repr(e))
+            k=input('\nPress enter x2 to close')
+        else:
+            k=input('\nPress enter x2 to close')
